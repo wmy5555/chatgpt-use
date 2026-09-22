@@ -1,0 +1,41 @@
+name: Verify Windows surface lock
+on:
+  push:
+    branches: [verify/windows-surface-lock]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Offline unit tests (no browser)
+        run: cargo test --locked
+      - name: Prove Windows regressions fail without the fix
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $path = 'src/channel.rs'
+          $original = [IO.File]::ReadAllText($path)
+          try {
+            [IO.File]::WriteAllText($path, $original.Replace('        .or_else(crate::platform::home_dir)', ''))
+            cargo test --locked channel::lock_tests::missing_home_
+            if ($LASTEXITCODE -eq 0) { throw 'Regression tests unexpectedly passed without the fix' }
+          } finally {
+            [IO.File]::WriteAllText($path, $original)
+          }
+          exit 0
+      - name: Build repaired Windows CLI
+        if: runner.os == 'Windows'
+        run: cargo build --release --locked
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: chatgpt-use-windows-lock-fix
+          path: target/release/chatgpt-use.exe
